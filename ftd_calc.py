@@ -129,25 +129,24 @@ def calcVelocityFromPropellant(context):
     propellant = context.get("propellant", 0)
     modules = context["modules"] 
     length = context["shellLength"]
-    #shellModules = calcShellLength(context)
     speedC = context.get("speedC", 1.0)
     
     mod = calcShellVolume(diameter, length)**0.03
-    #mod = calcShellVolumeForModules(diameter, shellModules)**0.03
     return 700.0 * propellant * speedC * mod / modules
 
 
 def calcVelocityFromRails(context):
     """Calculates shell velocity from rail charge"""
     diameter = context["diameter"]
-    modules = context["modules"] 
-    length = context["shellLength"]
-    speedC = context.get("speedC")
+    length = calcShellLength(context)
+    #length = context["length"]
+    speed_mod = context.get("speedC")
     charge = context.get("velCharge", 0)  # Energy used per shot
-    numRail = context.get("rails", 0)  # Number of rail casings
+    num_rails = context.get("rails", 0)  # Number of rail casings
     if charge != 0:
         # Rail casings produce a series like: [1.0, 1.5, 1.9499999999999997, 2.3549999999999995, 2.7195]
-        return (6.0 - 5.0 * (0.9**numRail)) * speedC * (8.0*charge)**0.5 / (length**0.25 * (5.0*diameter)**0.75)
+        rail_mod = 6.0 - 5.0 * (0.9**num_rails)
+        return rail_mod * speed_mod * (8.0*charge)**0.5 / (length**0.25 * (5.0*diameter)**0.75)
     return 0
 
 
@@ -459,7 +458,6 @@ def calcBulletStats(blueprint, diameter=None):
         
     if diameter is not None:
         calcBulletLength(result, diameter)
-        result["diameter"] = diameter
         
     return result
 
@@ -480,7 +478,9 @@ def calcBulletLength(config, diameter):
         length += partLength
         
     config["shellLength"] = shellLength
-    config["length"] = length        
+    config["length"] = length
+    config["diameter"] = diameter
+    return config
     
 
 # Generator for tail sections
@@ -603,6 +603,7 @@ def calcCannonData(config):
         
     config["velocity"] = calcTotalVelocity(config)
     config["accuracy"] = calcAccuracy(config)
+    return config
 
 
 def calcBestShells(loaderLength, maxModules, batch, context, scoreFn=None):
@@ -630,7 +631,6 @@ def calcBestShells(loaderLength, maxModules, batch, context, scoreFn=None):
         diameter = float(loaderLength) / modules
         if diameter > 0.5:
             diameter = 0.5
-        config["diameter"] = diameter
         
         calcBulletLength(config, diameter)
         calcCannonData(config)
