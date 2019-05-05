@@ -96,7 +96,21 @@ ShellModuleLength = {
 }
 
 def calcShellVolume(diameter, length):
+    """
+    Calculates shell volume
+    @param diameter - shell diameter, [m]
+    @param length - shell length, [m]
+    """
     return 0.25*math.pi * diameter**2 * length
+
+def calcShellVolumeForModules(diameter, modules):
+    """
+    Calculates shell volume, considering each module have the same length,
+    equal to diameter
+    @param diameter - shell diameter, [m]
+    @param modules - number of modules
+    """
+    return 0.25*math.pi * diameter**3 * modules
 
 # Bullet length without casing modules
 def calcShellLength(context):
@@ -110,11 +124,12 @@ def calcVelocityFromPropellant(context):
     diameter = context["diameter"]
     propellant = context.get("propellant", 0)
     modules = context["modules"] 
-    length = context["shellLength"]
-    speedC = context.get("speedC")
-    #base = 700.0 * propellant * speedC / modules
-    #add = calcShellVolume(diameter, propellant) / calcShellVolume(diameter, modules)**0.97
-    mod = calcShellVolume(diameter, length)**0.03
+    #length = context["shellLength"]
+    shellModules = calcShellLength(context)
+    speedC = context.get("speedC", 1.0)
+    
+    #mod = calcShellVolume(diameter, length)**0.03
+    mod = calcShellVolumeForModules(diameter, shellModules)**0.03
     return 700.0 * propellant * speedC * mod / modules
 
 # Calculates shell velocity from rail charge
@@ -403,7 +418,7 @@ def calcBulletStats(blueprint):
             
     result = {
         "kineticC": calcKineticMod(blueprint),
-        "speedC": calcSpeedMod(shellHead) * (1+bleeder),
+        "speedC": calcSpeedMod(blueprint) * (1+bleeder),
         "armorC": calcApMod(blueprint),
         "modules": len(blueprint),
         "expMod": explosiveMod, # Applies for explosive, flak, EMP
