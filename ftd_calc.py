@@ -1,6 +1,6 @@
 import math
 from copy import copy
-
+from shell_gen import *
 
 """
 This module contains formulas for advanced cannons in From The Depths game
@@ -138,15 +138,16 @@ def calcVelocityFromPropellant(context):
 def calcVelocityFromRails(context):
     """Calculates shell velocity from rail charge"""
     diameter = context["diameter"]
-    length = calcShellLength(context)
-    #length = context["length"]
+    shellLength = context["shellLength"]
+    length = context["length"]
     speed_mod = context.get("speedC")
     charge = context.get("velCharge", 0)  # Energy used per shot
     num_rails = context.get("rails", 0)  # Number of rail casings
     if charge != 0:
         # Rail casings produce a series like: [1.0, 1.5, 1.9499999999999997, 2.3549999999999995, 2.7195]
         rail_mod = 6.0 - 5.0 * (0.9**num_rails)
-        return rail_mod * speed_mod * (8.0*charge)**0.5 / (length**0.25 * (5.0*diameter)**0.75)
+        return rail_mod * speed_mod * (8.0*charge)**0.5 / (125 * length * diameter**3)**0.25
+        #return rail_mod * speed_mod * (8.0*charge)**0.5 / (shellLength**0.25 * (5.0*diameter)**0.5)
     return 0
 
 
@@ -199,7 +200,10 @@ def calcNumberOfCoolers(context):
     propellant = context.get("propellant", 0)
     if propellant == 0:
         return 0
-    return math.log(calcClipToAutoloader(context) / (6 * (5*diameter)**1.5 * (propellant ** 0.5)), 0.92)
+    coolers = math.log(calcClipToAutoloader(context) / (6 * (5*diameter)**1.5 * (propellant ** 0.5)), 0.92)
+    if coolers < 0:
+        coolers = 0
+    return math.ceil(coolers)
 
 
 def calcAccuracy(context):
@@ -222,20 +226,19 @@ def calcBaseAp(context):
 
 def calcKineticDamage(context):
     diameter = context["diameter"]
-    shellModules = calcShellLength(context)
+    length = context["shellLength"]
     kineticC = context["kineticC"]
     vel = calcTotalVelocity(context)
     ap = 0.01 * context["armorC"] * vel
-    # Right now it calculates a proper values, but maybe we should replace 'shellModules' by an actual length
-    return 1.25 * kineticC * vel * ((5*diameter)**1.95) * (shellModules**0.65), ap
+    return 1.25 * kineticC * vel * (125 * diameter**2 * length) ** 0.65, ap
 
 
-def calcExplosiveDamage(diameter, numExplosive):
-    return 500 * ((5*diameter)**1.95) * (numExplosive**0.65)
+def calcExplosiveDamage(diameter, num_explosive):
+    return 500 * (125*diameter**3 * num_explosive)**0.65
 
 
-def calcFlakDamage(diameter, numFlak):
-    return 250 * ((5*diameter)**1.95) * (numFlak**0.65)
+def calcFlakDamage(diameter, num_flak):
+    return 250 * (125*diameter**3 * num_flak)**0.65
 
 
 def calcNumFrags(diameter):
@@ -256,9 +259,9 @@ def calcSquashDamage(diameter, num_explosive, armor=6):
 
     # This damage has two parts:
     # - direct thump damage and spalling particles
-    spall_metric = 15 * (5*diameter)**1.95 * num_explosive ** 0.65
+    spall_metric = 15 * (125*diameter**3 * num_explosive)**0.65
     num_spalls = spall_metric / armor
-    thump_damage = 400 * (5*diameter)**1.95 * num_explosive ** 0.65
+    thump_damage = 400 * (125*diameter**3 * num_explosive)**0.65
     # Thump damage has AP 6. 
     return [(thump_damage, 6), (num_spalls * 200, 2*armor)]
 
@@ -414,6 +417,24 @@ def calcBulletStats(blueprint, diameter=None):
     Calculates basic stats for a shell blueprint
     @param blueprint: a list containing names of shell parts, in order from top to bottom
     @param diameter - shell diameter
+    @return:dict weapon config, used for further calculations
+
+    It will contain:
+     - kineticC": calcKineticMod(blueprint),
+     - speedC": calcSpeedMod(blueprint) * (1+bleeder),
+     - armorC": calcApMod(blueprint),
+     - modules": len(blueprint),
+     - expMod": explosive_mod,  # Applies for explosive, flak, EMP
+     - shell: shell blueprint: copy(blueprint),
+     - propellant - number of propellant modules
+     - rails - number of railgun casings
+     - numExplosive - number of explosive modules
+     - numFlak - number of flak modules
+
+    It will calculate geometry if diameter is not None:
+     - shellLength - length of the shell, in meters
+     - length - total length, in meters
+     - diameter - assigned diameter
     """
 
     bleeder = 0.0
@@ -457,14 +478,14 @@ def calcBulletStats(blueprint, diameter=None):
         result["rails"] = rails
         
     if diameter is not None:
-        calcBulletLength(result, diameter)
+        calcBulletGeometry(result, diameter)
         
     return result
 
 
-def calcBulletLength(config, diameter):
+def calcBulletGeometry(config, diameter):
     """
-    Calculates button length given config and diameter
+    Calculates button geometry given config and diameter
     """
     # Length without casing parts
     shellLength = 0
@@ -481,107 +502,6 @@ def calcBulletLength(config, diameter):
     config["length"] = length
     config["diameter"] = diameter
     return config
-    
-
-# Generator for tail sections
-def tailGen(limit, data=None):
-    if data is None or len(data) == 0:
-        yield []
-        return
-    for i in range(0, limit+1):
-        for j in range(0, limit+1-i): 
-            for k in range(0, min(limit+1-i-j, 2)):
-                if i + j > 0:
-                    yield data + ["bleeder"]*k+["gunpowder"]*i + ["rail"]*j
-    pass
-
-
-# Generator for shell body part
-def bodyGen(name):
-    def variants(limit, data, next_gen=None, *kargs):
-        for i in range(0, limit+1):
-            result = data + [name]*i
-            if next_gen is not None and limit-i >= 0:
-                yield from next_gen(limit - i, result, *kargs)
-            else:
-                yield result
-
-    return variants
-
-
-def bodySingleGen(variants):
-    # Generator for a body
-    def generator(limit, data, next_gen=None, *kargs):
-        if next_gen is not None:
-            yield from next_gen(limit, data, *kargs)
-        for head in variants:
-            result = data + [head]
-            if limit > 0:
-                yield from next_gen(limit - 1, copy(result), *kargs)
-            else:
-                yield result
-    return generator
-
-
-def headVariants(limit, data, next_gen, *args):
-    # Generator for head variants
-    yield from next_gen(limit, data, *args)
-    for head in ["composite", "apcap", "hollow", "scharge", "sabot", "squash"]:
-        result = data + [head]
-        if limit > 1:
-            yield from next_gen(limit - 1, copy(result), *args)
-        else:
-            yield result
-
-
-def makeShellVariants(limit, first, *args):
-    variants = []
-    data = []
-    for var in first(limit, data, *args):
-        if len(var) > 0:
-            variants.append(var)
-    return variants
-
-
-def allBodyGen(limit):
-    """
-    Generator for all body shell types.
-    @param limit: max number of elements in a blueprint.
-    @generates a set of blueprints, like: ['apcap', 'solid', 'solid', 'bleeder', 'bleeder', 'bleeder', 'rail', 'rail']
-    Note: it can generate a blueprint with a lesser number of elements. It just iterates over all possible variants.
-    """
-    generators = ()
-    data = []
-    gens = [bodyGen(part) for part in ['bsabot', 'solid', 'HE']]
-    for var in headVariants(limit, data, *gens, tailGen):
-        if len(var) > 0:
-            yield var    
-
-
-def calcDPSForLoader(loaderLength, context):
-    """
-    Finds best diameter/dps for specified loader length
-    """
-    # length = diameter * (modules)
-    modules = context.get("modules", 1)
-    diameter = float(loaderLength) / modules
-    context["diameter"] = diameter
-    results = []
-    for p in range(0, modules):
-        for r in range(0, modules-p+1):
-            context["propellant"] = p
-            context["rails"] = r
-            data = calcWeaponDPS(context)
-            data["diameter"] = diameter
-            
-            if p > 0:
-                data["propellant"] = p            
-            if r > 0:
-                data["rails"] = r
-            calcCannonData(data)
-            
-            results.append(data)
-    return results
 
 
 def calcCannonData(config):
@@ -592,20 +512,122 @@ def calcCannonData(config):
     data = calcWeaponDPS(config)
     config.update(data)
 
+    # Approximate number of blocks in laboratory weapon design.
+    blocks = 1
+
     prop = config.get("propellant", 0)
     if prop > 0:
         barrel = lengthForPropellant(prop, config['diameter'])
         if barrel > 0:
             config["barrel_p"] = barrel
+            blocks += math.ceil(barrel)
     coolers = calcNumberOfCoolers(config)
     if coolers > 0:
         config["coolers"] = coolers
         
     config["velocity"] = calcTotalVelocity(config)
     config["accuracy"] = calcAccuracy(config)
+    
+    # TODO: Calculate number of recoil adsorbers
+    # TODO: Calculate number of gauge increasers
+
+    autoloaderSize = config.get('loader_length', 1)
+    loaders = config.get('loaders', 1)
+    # Gauge complex
+    blocks += coolers
+    # Autoloader complex
+    blocks += (loaders + config.get("clipsPerLoader", 1)) * autoloaderSize
+    # Inserters
+    blocks += loaders * config.get("clipsPerLoader", 1) * 2
+
+    # Rail block
+    vel_charge = config.get('vel_charge', 0)
+    if vel_charge > 0:
+        charge_per_second = vel_charge / config['period']
+        # 100 charge per second
+        chargers = math.ceil(charge_per_second / 100)
+        blocks += chargers + 4
+
+    config['blocks'] = blocks
+
     return config
 
 
+MAX_DIAMETER = 0.500
+MIN_DIAMETER = 0.018
+
+
+class ShellOptimizer:
+    """
+    This class provides sheel optimization routines
+    """
+    def __init__(self, **kwargs):
+        """
+        @param loader_length: length of autoloader
+        @param max_modules: max shell modules to be used
+        @param max_results: number of results to be uploaded
+        @param score_fn: function to calculate a score to generated config
+        """
+        # Max module number to be optimized
+        self.max_modules = kwargs.get('max_modules', 4)
+        # Maximum number of reported results per optimization run
+        self.max_results = kwargs.get('max_results', 4)
+        # Score/filter function
+        self.score_fn = kwargs.get('score_fn', None)
+        self.diameter = kwargs.get('diameter', 'auto')
+
+    def calcBestShells(self, **kwargs):
+        """
+        Finds the best weapon config for specified weapon limits
+        """
+        best = []
+        current = []
+        scoreFn = self.score_fn
+        diameter_mode = self.diameter
+        
+        if scoreFn is None:
+            scoreFn = lambda a: a["dps"]
+
+        vel_charge = kwargs.get('velCharge', 0)
+
+        for blueprint in allBodyGen(self.max_modules):
+            config = dict(calcBulletStats(blueprint), **kwargs)
+            if 'loader_length' not in config:
+                config['loader_length'] = 1
+            if vel_charge == 0 and config.get('propellant', 0) == 0:
+                continue
+                
+            modules = config.get("modules", 1)
+            
+            if diameter_mode == 'auto':
+                # TODO: check if there are only rail blocks. Then we will take lowest diameter possible
+                # We are trying to get max possible diameter for the shell. Some modules have a limit for max diameter,
+                # so this calculation can provide us a bit smaller shell than it could be
+                if vel_charge > 0 and config.get('propellant', 0) == 0:
+                    diameter = MIN_DIAMETER
+                else:
+                    diameter = float(config['loader_length']) / modules
+            else:
+                diameter = diameter_mode
+                
+            if diameter > MAX_DIAMETER:
+                diameter = MAX_DIAMETER
+            if diameter < MIN_DIAMETER:
+                diameter = MIN_DIAMETER
+
+            calcBulletGeometry(config, diameter)
+            calcCannonData(config)
+
+            if scoreFn(config) > 0:
+                current.append(config)
+
+            if len(current) > self.max_results: 
+                best = sorted(best + current, key=scoreFn)[-self.max_results:]
+                current = []
+
+        return sorted(best + current, key=scoreFn)[-self.max_results:]
+
+    
 def calcBestShells(loaderLength, maxModules, batch, context, scoreFn=None):
     """
     Finds the best weapon config for specified weapon limits
@@ -629,10 +651,12 @@ def calcBestShells(loaderLength, maxModules, batch, context, scoreFn=None):
         # We are trying to get max possible diameter for the shell. Some modules have a limit for max diameter,
         # so this calculation can provide us a bit smaller shell than it could be
         diameter = float(loaderLength) / modules
-        if diameter > 0.5:
-            diameter = 0.5
+        if diameter > MAX_DIAMETER:
+            diameter = MAX_DIAMETER
+        if diameter < MIN_DIAMETER:
+            diameter = MIN_DIAMETER
         
-        calcBulletLength(config, diameter)
+        calcBulletGeometry(config, diameter)
         calcCannonData(config)
         
         if scoreFn(config) > 0:
@@ -673,7 +697,7 @@ def displayTable(results, columns=None):
     @param columns:list - a list of column names to be displayed
     """
     if columns is None:
-        columns = ["dps", "damage", "diameter", "velocity", "period", "shell"]
+        columns = ["dps", "damage", "diameter", "velocity", "period", "blocks", "shell"]
     # Row start - caption
     # Column - output variant
     # html = <table><tr><td>Name</td><td>Data1</td></tr></table>
