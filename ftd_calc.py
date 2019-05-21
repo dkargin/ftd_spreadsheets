@@ -115,8 +115,8 @@ def calcShellVolumeForModules(diameter, modules):
     return 0.25*math.pi * diameter**3 * modules
 
 
-def calcShellLength(context):
-    """Bullet length without casing modules"""
+def calcShellModuleLength(context):
+    """Calculates number of modules in the shell, without casing modules"""
     numModules = context["modules"]
     propellant = context.get("propellant", 0)
     rails = context.get("rails", 0)
@@ -127,12 +127,12 @@ def calcVelocityFromPropellant(context):
     """Calculates shell velocity from propellant burn"""
     diameter = context["diameter"]
     propellant = context.get("propellant", 0)
-    modules = context["modules"] 
-    length = context["shellLength"]
-    speedC = context.get("speedC", 1.0)
+    length = context["length"]
+    shell_length = context["shellLength"]
+    speed_mod = context.get("speedC", 1.0)
     
-    mod = calcShellVolume(diameter, length)**0.03
-    return 700.0 * propellant * speedC * mod / modules
+    volume = calcShellVolume(diameter, shell_length)**0.03
+    return 700.0 * propellant * speed_mod * volume * diameter / length
 
 
 def calcVelocityFromRails(context):
@@ -147,7 +147,6 @@ def calcVelocityFromRails(context):
         # Rail casings produce a series like: [1.0, 1.5, 1.9499999999999997, 2.3549999999999995, 2.7195]
         rail_mod = 6.0 - 5.0 * (0.9**num_rails)
         return rail_mod * speed_mod * (8.0*charge)**0.5 / (125 * length * diameter**3)**0.25
-        #return rail_mod * speed_mod * (8.0*charge)**0.5 / (shellLength**0.25 * (5.0*diameter)**0.5)
     return 0
 
 
@@ -210,7 +209,7 @@ def calcAccuracy(context):
     """Total inaccuracy, in degrees"""
     diameter = context["diameter"]
     propellant = context.get("propellant", 0)
-    shell = context.get("length", calcShellLength(context))
+    shell = context.get("length", calcShellModuleLength(context))
     # Barrel length
     barrel = context.get("barrel", 10)
     railCharge = context.get("accCharge", 0)
@@ -227,10 +226,12 @@ def calcBaseAp(context):
 def calcKineticDamage(context):
     diameter = context["diameter"]
     length = context["shellLength"]
+    module_length = calcShellModuleLength(context)
     kineticC = context["kineticC"]
     vel = calcTotalVelocity(context)
     ap = 0.01 * context["armorC"] * vel
     return 1.25 * kineticC * vel * (125 * diameter**2 * length) ** 0.65, ap
+    #return 1.25 * kineticC * vel * (125 * diameter**3 * module_length) ** 0.65, ap
 
 
 def calcExplosiveDamage(diameter, num_explosive):
@@ -295,7 +296,7 @@ def calcWeaponDPS(context):
     if 'length' not in context:
         context['length'] = context['modules'] * diameter
     if 'shellLength' not in context:
-        context['shellLength'] = calcShellLength(context) * diameter
+        context['shellLength'] = calcShellModuleLength(context) * diameter
         
     period = calcClipToAutoloader(context)
     
@@ -340,10 +341,15 @@ def calcWeaponDPS(context):
     return result
 
 
-def shell_module_size(shell):
+def shell_module_size(shell_blueprint):
+    """
+    Calculate shell module size for a blueprint
+    @param shell_blueprint:
+    @return:int number of modules in the shell, ignorign casing modumes
+    """
     size = 0
-    for i in range(0, len(shell)):
-        if shell[i] in TailParts:
+    for i in range(0, len(shell_blueprint)):
+        if shell_blueprint[i] in TailParts:
             break
         size += 1
     return size
@@ -494,7 +500,7 @@ def calcBulletGeometry(config, diameter):
     
     for part in config.get('shell', []):
         partLength = min(ShellModuleLength.get(part, 1.0), diameter)
-        if part not in TailParts:
+        if part not in TailParts and part != 'bleeder':
             shellLength += partLength
         length += partLength
         
@@ -669,43 +675,59 @@ def calcBestShells(loaderLength, maxModules, batch, context, scoreFn=None):
     return sorted(best + current, key=scoreFn)[-batch:]
 
 
-def formatValue(key, value):
-    """
-    Formating value to be displayed in results table
-    """
-    if key == 'diameter':
-        return '{:3}'.format(math.floor(value*1000))
-    if key == 'damage':
-        damage_data = []
-        for dtype, damage in value.items():
-            if isinstance(damage, tuple) and len(damage) == 2:
-                damage_data.append('{0}={1:3d}:{2:3.1f}'.format(dtype, int(damage[0]), damage[1]))
-            else:
-                damage_data.append('{0}={1}'.format(dtype, str(damage)))
-        return '</br>'.join(damage_data)
-    if isinstance(value, float):
-        return '{: 3.2f}'.format(value)
-    
-    return str(value)
+# Checks if value A is within accuracy range from value B
+def is_accurate(val_a, val_b, accuracy=2.0):
+    if val_a == val_b:
+        return True
+    delta = abs(val_b - val_a)
+    denominator = max(val_a, val_b)
+    return (delta * 100 / denominator) < accuracy
 
-from IPython.display import HTML, display
 
-def displayTable(results, columns=None):
-    """
-    Generates HTML table for results obtained from calcBestShells
-    @param results - a list with results, obtained from calcBestShells
-    @param columns:list - a list of column names to be displayed
-    """
-    if columns is None:
-        columns = ["dps", "damage", "diameter", "velocity", "period", "blocks", "shell"]
-    # Row start - caption
-    # Column - output variant
-    # html = <table><tr><td>Name</td><td>Data1</td></tr></table>
-    caption = '<td>{}</td>'.format('</td><td>'.join('<b>{}</b>'.format(str(key).upper()) for key in columns))
-    rows = []
-    for row in results:
-        line = '</td><td>'.join(formatValue(key, row[key]) for key in columns)
-        rows.append('<td>{}</td>'.format(line))
-    
-    htmlData = '</tr><tr>'.join(rows)
-    return display(HTML('<table><tr>' + caption + '</tr><tr>' + htmlData + '</tr></table>'))
+# Run verification for real game data
+def run_verification(dataset):
+    miscalculated = 0
+    for reference_data in dataset:
+        diameter = reference_data['diameter']
+        blueprint = reference_data['shell']
+        charge = reference_data.get('charge', 0)
+        config = FTD.calcBulletStats(blueprint, diameter)
+        config['velCharge'] = charge
+        FTD.calcCannonData(config)
+        report = []
+        damage = config['damage']
+        if 'velocity' in reference_data:
+            ref = reference_data['velocity']
+            actual = config['velocity']
+            if not is_accurate(ref, actual):
+                report.append(" - velocity: real={0} vs {1}".format(ref, actual))
+        if 'kinetic' in reference_data:
+            ref = reference_data['kinetic']
+            actual = damage.get('kinetic', (0, 0))[0]
+            actual_ap = damage.get('kinetic', (0, 0))[1]
+            if not is_accurate(ref, actual):
+                report.append(" - kinetic damage: real={0} vs {1}".format(ref, actual))
+            if 'ap' in reference_data:
+                ref = reference_data['ap']
+                if not is_accurate(ref, actual_ap):
+                    report.append(" - AP: real={0} vs {1}".format(ref, actual_ap))
+
+        if 'explosive' in reference_data:
+            ref = reference_data['explosive']
+            actual = damage.get('HE', (0, 0))[0]
+            if not is_accurate(ref, actual):
+                report.append(" - HE damage: real={0} vs {1}".format(ref, actual))
+
+        if 'T' in reference_data:
+            ref = reference_data['T']
+            actual = config['period']
+            if not is_accurate(ref, actual):
+                report.append(" - load time: real={0} vs {1}".format(ref, actual))
+
+        if len(report) > 0:
+            print("Check failed for shell=%s, diameter=%d, charge=%d" % (str(blueprint), diameter*1000, charge))
+            miscalculated += 1
+            for line in report:
+                print(line)
+    if miscalculated == 0:
+        print('Calculations are fine so far')

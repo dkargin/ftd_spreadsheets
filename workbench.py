@@ -37,10 +37,12 @@ real_data = [
          T=22.16, velocity=326, ap=3.0, exp=2985, kin=2842),
     dict(shell=['HE', 'HE', 'HE', 'gunpowder'], diameter=0.5,
          velocity=169, ap=2.5, explosive=6096, kinetic=6428),
-    dict(shell=['solid', 'solid', 'solid', 'gunpowder'],
-         diameter=0.5, velocity=219, ap=4.4, kinetic=16713),
-    dict(shell=['solid', 'solid', 'gunpowder', 'gunpowder'],
-         diameter=0.5, velocity=219, ap=4.4, kinetic=17760),
+    dict(shell=['solid', 'solid', 'solid', 'gunpowder'], diameter=0.5,
+         velocity=219, ap=4.4, kinetic=16713),
+    dict(shell=['solid', 'solid', 'gunpowder', 'gunpowder'], diameter=0.5,
+         velocity=433, ap=7.1, kinetic=17760),
+    dict(shell=['solid', 'solid', 'gunpowder', 'gunpowder'], diameter=0.5, charge=1000,
+         velocity=482, ap=7.9, kinetic=19775),
     dict(shell=['HE', 'HE', 'gunpowder', 'gunpowder'],
          diameter=0.5, T=31.33, velocity=333, ap=4.2, explosive=4684, kinetic=7196),
     dict(shell=['HE', 'HE', 'bleeder', 'gunpowder'],
@@ -50,50 +52,4 @@ real_data = [
 ]
 
 
-# Checks if value A is within accuracy range from value B
-def is_accurate(val_a, val_b, accuracy=2.0):
-    if val_a == val_b:
-        return True
-    delta = abs(val_b - val_a)
-    denominator = max(val_a, val_b)
-    return (delta * 100 / denominator) < accuracy
-
-
-# Run verification for real game data
-def run_verification(dataset):
-    miscalculated = 0
-    for reference_data in dataset:
-        diameter = reference_data['diameter']
-        blueprint = reference_data['shell']
-        config = FTD.calcBulletStats(blueprint, diameter)
-        FTD.calcCannonData(config)
-        report = []
-        damage = config['damage']
-        if 'velocity' in reference_data:
-            ref = reference_data['velocity']
-            actual = config['velocity']
-            if not is_accurate(ref, actual):
-                report.append(" - velocity: real={0} vs {1}".format(ref, actual))
-        if 'kinetic' in reference_data:
-            ref = reference_data['kinetic']
-            actual = damage.get('kinetic', (0, 0))[0]
-            if not is_accurate(ref, actual):
-                report.append(" - kinetic damage: real={0} vs {1}".format(ref, actual))
-            if 'ap' in reference_data:
-                pass
-
-        if 'explosive' in reference_data:
-            ref = reference_data['explosive']
-            actual = damage.get('HE', (0, 0))[0]
-            if not is_accurate(ref, actual):
-                report.append(" - HE damage: real={0} vs {1}".format(ref, actual))
-
-        if len(report) > 0:
-            print("Check failed for shell=%s, diameter=%d" % (str(blueprint), diameter*100))
-            miscalculated += 1
-            for line in report:
-                print(line)
-    if miscalculated == 0:
-        print('Calculations are fine so far')
-
-run_verification(real_data)
+FTD.run_verification(real_data)
