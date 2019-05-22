@@ -48,6 +48,10 @@ ShellSpeedMod = {
     "hollow": 1.4,
     "apcap": 1.5,
     "composite": 1.6,
+    "flakhead": 1.4,
+    "fraghead": 1.4,
+    "HEhead": 1.4,
+    "skimmer": 1.75,
 }
 
 # Armor piercing modifier for the shell's part
@@ -60,13 +64,17 @@ ShellApMod = {
     "solid": 2,
     "flak": 0.4,
     "stab": 0.5,
-    "frag": 0.4, 
+    "frag": 1.5,
     "squash": 0.3,
     "sabot": 6.75,
     "scharge": 0.1,
     "hollow": 0.25,
     "apcap": 3.5,
     "composite": 4.5,
+    "flakhead": 0.1,
+    "fraghead": 0.1,
+    "skimmer": 3.0,
+    "HEhead": 0.1,
 }
 
 # Kinetic modifier for the shell's part
@@ -86,7 +94,14 @@ ShellKineticMod = {
     "hollow": 1.2,
     "apcap": 10.0,
     "composite": 5.0,
+
+    "flakhead": 2.5,
+    "fraghead": 2.5,
+    "skimmer": 3.0,
+    "HEhead": 2.5
 }
+
+## "fraghead", "skimmer", "hollow", "HEhead"
 
 TailParts = ['rail', 'gunpowder']
 
@@ -179,18 +194,19 @@ def calcClipToAutoloader(context):
     """
     diameter = context["diameter"]
     length = context["length"]
-    totalLoaders = context.get("loaders", 1)
+    total_loaders = context.get("loaders", 1)
+    volume = calcShellVolume(diameter, length)
     if context.get("belt", False):
-        return 10 * (totalLoaders**0.25) * (calcShellVolume(diameter, length))**0.5
-    clipsAttached = context.get("clipsPerLoader", 1)
-    return 50 * (totalLoaders**0.25) * (calcShellVolume(diameter, length)/ clipsAttached)**0.5
+        return 10 * total_loaders**0.25 * volume**0.5
+    clips_attached = context.get("clipsPerLoader", 1)
+    return 50 * total_loaders**0.25 * (volume / clips_attached)**0.5
 
 
-def calcBarrelCooldown(diameter, propellant, numCooling):
+def calcBarrelCooldown(diameter, propellant, num_cooling):
     """
     Time to cool down a barrel after a shot.
     """
-    return 6 * (5*diameter)**1.5 * (propellant ** 0.5) * 0.92 ** numCooling
+    return 6 * (5*diameter)**1.5 * (propellant ** 0.5) * 0.92 ** num_cooling
 
 
 def calcNumberOfCoolers(context):
@@ -260,9 +276,9 @@ def calcSquashDamage(diameter, num_explosive, armor=6):
 
     # This damage has two parts:
     # - direct thump damage and spalling particles
-    spall_metric = 15 * (125*diameter**3 * num_explosive)**0.65
+    spall_metric = 15 * (125 * diameter**3 * num_explosive)**0.65
     num_spalls = spall_metric / armor
-    thump_damage = 400 * (125*diameter**3 * num_explosive)**0.65
+    thump_damage = 400 * (125 * diameter**3 * num_explosive)**0.65
     # Thump damage has AP 6. 
     return [(thump_damage, 6), (num_spalls * 200, 2*armor)]
 
@@ -691,9 +707,9 @@ def run_verification(dataset):
         diameter = reference_data['diameter']
         blueprint = reference_data['shell']
         charge = reference_data.get('charge', 0)
-        config = FTD.calcBulletStats(blueprint, diameter)
+        config = calcBulletStats(blueprint, diameter)
         config['velCharge'] = charge
-        FTD.calcCannonData(config)
+        calcCannonData(config)
         report = []
         damage = config['damage']
         if 'velocity' in reference_data:
